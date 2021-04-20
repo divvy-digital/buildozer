@@ -1174,6 +1174,13 @@ class TargetAndroid(Target):
             build_cmd += [("--intent-filters", join(self.buildozer.root_dir,
                                                     intent_filters))]
 
+        # extra application xml
+        extra_application_xml = config.getdefault(
+            'app', 'android.manifest.extra_application_xml', '')
+        if extra_application_xml:
+            build_cmd += [("--extra-application-xml", join(self.buildozer.root_dir,
+                                                           extra_application_xml))]
+
         # activity launch mode
         launch_mode = config.getdefault(
             'app', 'android.manifest.launch_mode', '')
