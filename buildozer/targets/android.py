@@ -1181,8 +1181,6 @@ class TargetAndroid(Target):
             build_cmd += [("--extra-application-xml", join(self.buildozer.root_dir,
                                                            extra_application_xml))]
 
-        build_cmd += [('--extra-manifest-application-arguments', '\'android:requestLegacyExternalStorage="true"\'')]
-
         # activity launch mode
         launch_mode = config.getdefault(
             'app', 'android.manifest.launch_mode', '')
