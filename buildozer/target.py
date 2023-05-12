@@ -12,6 +12,7 @@ class Target:
     def __init__(self, buildozer):
         self.buildozer = buildozer
         self.build_mode = 'debug'
+        self.artifact_format = 'apk'
         self.platform_update = False
 
     def check_requirements(self):
@@ -101,6 +102,7 @@ class Target:
     def cmd_debug(self, *args):
         self.buildozer.prepare_for_build()
         self.build_mode = 'debug'
+        self.artifact_format = self.buildozer.config.getdefault('app', 'android.debug_artifact', 'apk')
         self.buildozer.build()
 
     def cmd_release(self, *args):
@@ -137,6 +139,7 @@ class Target:
                 exit(1)
 
         self.build_mode = 'release'
+        self.artifact_format = self.buildozer.config.getdefault('app', 'android.release_artifact', 'aab')
         self.buildozer.build()
 
     def cmd_deploy(self, *args):
@@ -225,8 +228,6 @@ class Target:
             branch = config.getdefault('app', '{}_branch'.format(key), branch)
             default_url = url_format.format(owner=owner, repo=repo, branch=branch)
             url = config.getdefault('app', '{}_url'.format(key), default_url)
-            if branch != 'master':
-                url = "--branch {} {}".format(branch, url)
         return path, url, branch
 
     def install_or_update_repo(self, repo, **kwargs):
@@ -234,7 +235,7 @@ class Target:
 
         This will clone the contents of a git repository to
         `buildozer.platform_dir`. The location of this repo can be
-        speficied via URL and branch name, or via a custom (local)
+        specified via URL and branch name, or via a custom (local)
         directory name.
 
         :Parameters:
@@ -249,15 +250,14 @@ class Target:
         custom_dir, clone_url, clone_branch = self.path_or_git_url(repo, **kwargs)
         if not self.buildozer.file_exists(install_dir):
             if custom_dir:
-                cmd('mkdir -p "{}"'.format(install_dir))
-                cmd('cp -a "{}"/* "{}"/'.format(custom_dir, install_dir))
+                cmd(["mkdir", "-p", install_dir])
+                cmd(["cp", "-a", f"{custom_dir}/*", f"{install_dir}/"])
             else:
-                cmd('git clone {}'.format(clone_url),
-                        cwd=self.buildozer.platform_dir)
+                cmd(["git", "clone", "--branch", clone_branch, clone_url], cwd=self.buildozer.platform_dir)
         elif self.platform_update:
             if custom_dir:
-                cmd('cp -a "{}"/* "{}"/'.format(custom_dir, install_dir))
+                cmd(["cp", "-a", f"{custom_dir}/*", f"{install_dir}/"])
             else:
-                cmd('git clean -dxf', cwd=install_dir)
-                cmd('git pull origin {}'.format(clone_branch), cwd=install_dir)
+                cmd(["git", "clean", "-dxf"], cwd=install_dir)
+                cmd(["git", "pull", "origin", clone_branch], cwd=install_dir)
         return install_dir

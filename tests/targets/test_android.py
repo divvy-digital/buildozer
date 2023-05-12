@@ -1,7 +1,8 @@
 import os
 import tempfile
-from six import StringIO
+from io import StringIO
 from unittest import mock
+import sys
 
 import pytest
 
@@ -57,7 +58,7 @@ def call_build_package(target_android):
     """
     buildozer = target_android.buildozer
     expected_dist_dir = (
-        '{buildozer_dir}/android/platform/build-armeabi-v7a/dists/myapp__armeabi-v7a'.format(
+        '{buildozer_dir}/android/platform/build-arm64-v8a_armeabi-v7a/dists/myapp'.format(
         buildozer_dir=buildozer.buildozer_dir)
     )
 
@@ -79,7 +80,7 @@ def call_build_package(target_android):
             '{expected_dist_dir}/bin/MyApplication-0.1-debug.apk'.format(
                 expected_dist_dir=expected_dist_dir
             ),
-            '{bin_dir}/myapp-0.1-armeabi-v7a-debug.apk'.format(bin_dir=buildozer.bin_dir),
+            '{bin_dir}/myapp-0.1-arm64-v8a_armeabi-v7a-debug.apk'.format(bin_dir=buildozer.bin_dir),
         )
     ]
     return m_execute_build_package
@@ -104,32 +105,27 @@ class TestTargetAndroid:
         """Tests init defaults."""
         target_android = init_target(self.temp_dir)
         buildozer = target_android.buildozer
-        assert target_android._arch == "armeabi-v7a"
+        assert target_android._archs == ["arm64-v8a", "armeabi-v7a"]
         assert target_android._build_dir.endswith(
-            ".buildozer/android/platform/build-armeabi-v7a"
+            ".buildozer/android/platform/build-arm64-v8a_armeabi-v7a"
         )
         assert target_android._p4a_bootstrap == "sdl2"
-        assert target_android._p4a_cmd.endswith(
-            "python -m pythonforandroid.toolchain "
-        )
+        assert target_android._p4a_cmd == [sys.executable or 'python', "-m", "pythonforandroid.toolchain"]
         assert target_android.build_mode == "debug"
-        assert (
-            target_android.extra_p4a_args == (
-                ' --color=always'
-                ' --storage-dir="{buildozer_dir}/android/platform/build-armeabi-v7a" --ndk-api=21 --ignore-setup-py'.format(
-                buildozer_dir=buildozer.buildozer_dir)
-            )
-        )
-        assert target_android.p4a_apk_cmd == "apk --debug --bootstrap=sdl2"
+        assert target_android.extra_p4a_args == [
+            "--color=always",
+            f"--storage-dir={buildozer.buildozer_dir}/android/platform/build-arm64-v8a_armeabi-v7a",
+            "--ndk-api=21",
+            "--ignore-setup-py",
+            "--debug",
+        ]
         assert target_android.platform_update is False
 
     def test_init_positional_buildozer(self):
         """Positional `buildozer` argument is required."""
         with pytest.raises(TypeError) as ex_info:
             TargetAndroid()
-        assert ex_info.value.args == (
-            "__init__() missing 1 required positional argument: 'buildozer'",
-        )
+        assert ex_info.value.args[-1].endswith("__init__() missing 1 required positional argument: 'buildozer'")
 
     def test_sdkmanager(self):
         """Tests the _sdkmanager() method."""
@@ -155,7 +151,8 @@ class TestTargetAndroid:
         """Basic tests for the check_requirements() method."""
         target_android = init_target(self.temp_dir)
         buildozer = target_android.buildozer
-        assert not hasattr(target_android, "adb_cmd")
+        assert not hasattr(target_android, "adb_executable")
+        assert not hasattr(target_android, "adb_args")
         assert not hasattr(target_android, "javac_cmd")
         assert "PATH" not in buildozer.environ
         with patch_buildozer_checkbin() as m_checkbin:
@@ -166,9 +163,8 @@ class TestTargetAndroid:
             mock.call("Java compiler (javac)", "javac"),
             mock.call("Java keytool (keytool)", "keytool"),
         ]
-        assert target_android.adb_cmd.endswith(
-            ".buildozer/android/platform/android-sdk/platform-tools/adb"
-        )
+        assert target_android.adb_executable.endswith(".buildozer/android/platform/android-sdk/platform-tools/adb")
+        assert target_android.adb_args == []
         assert target_android.javac_cmd == "javac"
         assert target_android.keytool_cmd == "keytool"
         assert "PATH" in buildozer.environ
@@ -180,7 +176,7 @@ class TestTargetAndroid:
             "buildozer.targets.android.Target.check_configuration_tokens"
         ) as m_check_configuration_tokens:
             target_android.check_configuration_tokens()
-        assert m_check_configuration_tokens.call_args_list == [mock.call([])]
+        assert m_check_configuration_tokens.call_args_list == [mock.call()]
 
     @pytest.mark.parametrize("platform", ["linux", "darwin"])
     def test_install_android_sdk(self, platform):
@@ -224,7 +220,7 @@ class TestTargetAndroid:
         assert m_execute_build_package.call_args_list == [
             mock.call(
                 [
-                    ("--name", "'My Application'"),
+                    ("--name", "My Application"),
                     ("--version", "0.1"),
                     ("--package", "org.test.myapp"),
                     ("--minsdk", "21"),
@@ -234,9 +230,79 @@ class TestTargetAndroid:
                     ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
                     ("--orientation", "portrait"),
                     ("--window",),
+                    ('--enable-androidx',),
                     ("debug",),
                 ]
             )
+        ]
+
+    def test_execute_build_package__debug__apk(self):
+        """Basic tests for the execute_build_package() method. (in debug mode)"""
+        target_android = init_target(self.temp_dir)
+        buildozer = target_android.buildozer
+        with patch_target_android("_p4a") as m__p4a:
+            target = TargetAndroid(buildozer)
+            target.execute_build_package([("debug",)])
+        assert m__p4a.call_args_list == [
+            mock.call([
+                "apk",
+                "--bootstrap",
+                "sdl2",
+                "--dist_name",
+                "myapp",
+                "--copy-libs",
+                "--arch",
+                "arm64-v8a",
+                "--arch",
+                "armeabi-v7a"
+            ])
+        ]
+
+    def test_execute_build_package__release__apk(self):
+        """Basic tests for the execute_build_package() method. (in apk release mode)"""
+        target_android = init_target(self.temp_dir)
+        buildozer = target_android.buildozer
+        with patch_target_android("_p4a") as m__p4a:
+            target = TargetAndroid(buildozer)
+            target.execute_build_package([("release",)])
+        assert m__p4a.call_args_list == [
+            mock.call([
+                "apk",
+                "--bootstrap",
+                "sdl2",
+                "--dist_name",
+                "myapp",
+                "--release",
+                "--copy-libs",
+                "--arch",
+                "arm64-v8a",
+                "--arch",
+                "armeabi-v7a"
+            ])
+        ]
+
+    def test_execute_build_package__release__aab(self):
+        """Basic tests for the execute_build_package() method. (in aab release mode)"""
+        target_android = init_target(self.temp_dir)
+        buildozer = target_android.buildozer
+        with patch_target_android("_p4a") as m__p4a:
+            target = TargetAndroid(buildozer)
+            target.artifact_format = "aab"
+            target.execute_build_package([("release",)])
+        assert m__p4a.call_args_list == [
+            mock.call([
+                "aab",
+                "--bootstrap",
+                "sdl2",
+                "--dist_name",
+                "myapp",
+                "--release",
+                "--copy-libs",
+                "--arch",
+                "arm64-v8a",
+                "--arch",
+                "armeabi-v7a",
+            ])
         ]
 
     def test_numeric_version(self):
@@ -249,7 +315,7 @@ class TestTargetAndroid:
         assert m_execute_build_package.call_args_list == [
             mock.call(
                 [
-                    ("--name", "'My Application'"),
+                    ("--name", "My Application"),
                     ("--version", "0.1"),
                     ("--package", "org.test.myapp"),
                     ("--minsdk", "21"),
@@ -259,6 +325,7 @@ class TestTargetAndroid:
                     ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
                     ("--orientation", "portrait"),
                     ("--window",),
+                    ('--enable-androidx',),
                     ("--numeric-version", "1234"),
                     ("debug",),
                 ]
@@ -284,7 +351,7 @@ class TestTargetAndroid:
         assert m_execute_build_package.call_args_list == [
             mock.call(
                 [
-                    ('--name', "'My Application'"),
+                    ('--name', "My Application"),
                     ('--version', '0.1'),
                     ('--package', 'org.test.myapp'),
                     ('--minsdk', '21'),
@@ -294,6 +361,7 @@ class TestTargetAndroid:
                     ('--android-apptheme', '@android:style/Theme.NoTitleBar'),
                     ('--orientation', 'portrait'),
                     ('--window',),
+                    ('--enable-androidx',),
                     ('--intent-filters', os.path.realpath(filters_path)),
                     ('debug',),
                 ]
@@ -310,7 +378,7 @@ class TestTargetAndroid:
         assert m_execute_build_package.call_args_list == [
             mock.call(
                 [
-                    ("--name", "'My Application'"),
+                    ("--name", "My Application"),
                     ("--version", "0.1"),
                     ("--package", "org.test.myapp"),
                     ("--minsdk", "21"),
@@ -320,6 +388,7 @@ class TestTargetAndroid:
                     ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
                     ("--orientation", "portrait"),
                     ("--window",),
+                    ('--enable-androidx',),
                     ("--allow-backup", "false"),
                     ("debug",),
                 ]
@@ -336,7 +405,7 @@ class TestTargetAndroid:
         assert m_execute_build_package.call_args_list == [
             mock.call(
                 [
-                    ("--name", "'My Application'"),
+                    ("--name", "My Application"),
                     ("--version", "0.1"),
                     ("--package", "org.test.myapp"),
                     ("--minsdk", "21"),
@@ -346,6 +415,7 @@ class TestTargetAndroid:
                     ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
                     ("--orientation", "portrait"),
                     ("--window",),
+                    ('--enable-androidx',),
                     ("--backup-rules", "{root_dir}/backup_rules.xml".format(root_dir=buildozer.root_dir)),
                     ("debug",),
                 ]
@@ -364,7 +434,7 @@ class TestTargetAndroid:
             target_android._install_p4a()
 
         assert mock.call(
-            'git clone -b master --single-branch https://custom-p4a-url/p4a.git python-for-android',
+            ["git", "clone", "-b", "master", "--single-branch", "https://custom-p4a-url/p4a.git", "python-for-android"],
             cwd=mock.ANY) in m_cmd.call_args_list
 
     def test_install_platform_p4a_clone_fork(self):
@@ -378,7 +448,7 @@ class TestTargetAndroid:
             target_android._install_p4a()
 
         assert mock.call(
-            'git clone -b master --single-branch https://github.com/fork/python-for-android.git python-for-android',
+            ["git", "clone", "-b", "master", "--single-branch", "https://github.com/fork/python-for-android.git", "python-for-android"],
             cwd=mock.ANY) in m_cmd.call_args_list
 
     def test_install_platform_p4a_clone_default(self):
@@ -390,5 +460,57 @@ class TestTargetAndroid:
             target_android._install_p4a()
 
         assert mock.call(
-            'git clone -b master --single-branch https://github.com/kivy/python-for-android.git python-for-android',
+            ["git", "clone", "-b", "master", "--single-branch", "https://github.com/kivy/python-for-android.git", "python-for-android"],
             cwd=mock.ANY) in m_cmd.call_args_list
+
+    def test_orientation(self):
+        target_android = init_target(self.temp_dir, {
+            "orientation": "portrait,portrait-reverse"
+        })
+        buildozer = target_android.buildozer
+        m_execute_build_package = call_build_package(target_android)
+        assert m_execute_build_package.call_args_list == [
+            mock.call(
+                [
+                    ("--name", "My Application"),
+                    ("--version", "0.1"),
+                    ("--package", "org.test.myapp"),
+                    ("--minsdk", "21"),
+                    ("--ndk-api", "21"),
+                    ("--private", "{buildozer_dir}/android/app".format(buildozer_dir=buildozer.buildozer_dir)),
+                    ("--android-entrypoint", "org.kivy.android.PythonActivity"),
+                    ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
+                    ("--orientation", "portrait"),
+                    ("--orientation", "portrait-reverse"),
+                    ("--window",),
+                    ('--enable-androidx',),
+                    ("debug",),
+                ]
+            )
+        ]
+
+    def test_manifest_orientation(self):
+        target_android = init_target(self.temp_dir, {
+            "android.manifest.orientation": "fullSensor"
+        })
+        buildozer = target_android.buildozer
+        m_execute_build_package = call_build_package(target_android)
+        assert m_execute_build_package.call_args_list == [
+            mock.call(
+                [
+                    ("--name", "My Application"),
+                    ("--version", "0.1"),
+                    ("--package", "org.test.myapp"),
+                    ("--minsdk", "21"),
+                    ("--ndk-api", "21"),
+                    ("--private", "{buildozer_dir}/android/app".format(buildozer_dir=buildozer.buildozer_dir)),
+                    ("--android-entrypoint", "org.kivy.android.PythonActivity"),
+                    ("--android-apptheme", "@android:style/Theme.NoTitleBar"),
+                    ("--orientation", "portrait"),
+                    ("--window",),
+                    ('--enable-androidx',),
+                    ("--manifest-orientation", "fullSensor"),
+                    ("debug",),
+                ]
+            )
+        ]

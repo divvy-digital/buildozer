@@ -115,14 +115,19 @@ Section [app]
   The icon of your application. It must be a PNG of 512x512 size to be able to
   cover all the various platform requirements.
 
-- `orientation`: String, orientation of the application.
+- `orientation`: List, supported orientations of the application.
 
-  Indicate the orientation that your application supports. Defaults to
-  `landscape`, but can be changed to `portrait` or `all`.
+  Indicate the orientations that your application supports.
+  Valid values are: `portrait`, `landscape`, `portrait-reverse`, `landscape-reverse`.
+  Defaults to `[landscape]`.
 
 - `fullscreen`: Boolean, fullscreen mode.
 
   Defaults to true, your application will run in fullscreen. Means the status
   bar will be hidden. If you want to let the user access the status bar,
   hour, notifications, use 0 as a value.
+
+- `home_app`: Boolean, Home App (launcher app) usage.
+
+  Defaults to false, your application will be listed as a Home App (launcher app) if true.
 
